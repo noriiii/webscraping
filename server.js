@@ -1,43 +1,44 @@
-/* Students: Using the tools and techniques you learned so far,
- * you will scrape a website of your choice, then place the data
- * in a MongoDB database. Be sure to make the database and collection
- * before running this exercise.
-
- * Consult the assignment files from earlier in class
- * if you need a refresher on Cheerio. */
-
 // Dependencies
 var express = require("express");
-var exHandlebars = require("express-handlebars");
-var mongoose = require("mongoose");
-var mongojs = require("mongojs");
 var bodyParser = require("body-parser");
+var logger = require("morgan");
+var mongoose = require("mongoose");
+
+// Models
+var Article = require("./models/Article.js")
+
+// Scraping packages
 var cheerio = require("cheerio");
 var request = require("request");
 
 // Initialize Express
 var app = express();
 
-// Database configuration
-var databaseUrl = "scraper";
-var collections = ["scrapedData"];
+app.use(logger("dev"));
+app.use(bodyParser.urlencoded({
+  extended: false
+}));
 
-// Hook mongojs configuration to the db variable
-var db = mongojs(databaseUrl, collections);
+app.use(express.static("public"));
+
+mongoose.connect("mongodb://localhost/webscrapingHW");
+var db = mongoose.connection;
+
 db.on("error", function(error) {
-  console.log("Database Error:", error);
+  console.log("Mongoose Error: ", error);
 });
 
-// Main route (simple Hello World Message)
-app.get("/", function(req, res) {
-  res.send("This site works");
+db.once("open", function() {
+  console.log("Mongoose connection successful.");
 });
 
+// Routes
 
-/* -/-/-/-/-/-/-/-/-/-/-/-/- */
+// scraping
+
 app.get("/scrape", function(req, res) {
 // Make a request call to grab the HTML body from the site of your choice
-request("http://www.huffingtonpost.com/", function(error, response, html) {
+request("http://www.billboard.com/news", function(error, response, html) {
 console.log(html);
 
 // $
@@ -45,33 +46,99 @@ console.log(html);
 
   // Headline
 
-  $("h2.card__splash-title.bn-clickable").each(function(i, element) {
-    
-    var title = $(element).text();
-    var summary = $(element).text()
-    var link = $(element).parent().attr("href");
+  $(".content-title").each(function(i, element) {
 
 
-    db.scrapedData.insert({ title: title, summary: summary, link: link });
+          // Save an empty result object
+      var result = {};
 
-    res.send("Scraping is done");
+      // Add the text and href of every link, and save them as properties of the result object
+      result.title = $(this).children("a").text();
+      result.link = $(this).children("a").attr("href");
 
-   });
+      // Using our Article model, create a new entry
+      // This effectively passes the result object to the entry (and the title and link)
+      var entry = new Article(result);
 
+      // Now, save that entry to the db
+      entry.save(function(err, doc) {
+        // Log any errors
+        if (err) {
+          console.log(err);
+        }
+        // Or log the doc
+        else {
+          console.log(doc);
+        }
+      });
+
+    });
   });
-
+  // Tell the browser that we finished scraping the text
+  res.send("Scrape is Complete");
 });
 
-app.get("/all", function(req, res) {
-  // Query: In our database, go to the animals collection, then "find" everything
-  db.scrapedData.find({}, function(error, found) {
-    // Log any errors if the server encounters one
+// This will get the articles we scraped from the mongoDB
+app.get("/articles", function(req, res) {
+  // Grab every doc in the Articles array
+  Article.find({}, function(error, doc) {
+    // Log any errors
     if (error) {
       console.log(error);
     }
-    // Otherwise, send the result of this query to the browser
+    // Or send the doc to the browser as a json object
     else {
-      res.json(found);
+      res.json(doc);
+    }
+  });
+});
+
+// Grab an article by it's ObjectId
+app.get("/articles/:id", function(req, res) {
+  // Using the id passed in the id parameter, prepare a query that finds the matching one in our db...
+  Article.findOne({ "_id": req.params.id })
+  // ..and populate all of the notes associated with it
+  .populate("note")
+  // now, execute our query
+  .exec(function(error, doc) {
+    // Log any errors
+    if (error) {
+      console.log(error);
+    }
+    // Otherwise, send the doc to the browser as a json object
+    else {
+      res.json(doc);
+    }
+  });
+});
+
+
+// Create a new note or replace an existing note
+app.post("/articles/:id", function(req, res) {
+  // Create a new note and pass the req.body to the entry
+  var newNote = new Note(req.body);
+
+  // And save the new note the db
+  newNote.save(function(error, doc) {
+    // Log any errors
+    if (error) {
+      console.log(error);
+    }
+    // Otherwise
+    else {
+      // Use the article id to find and update it's note
+      Article.findOneAndUpdate({ "_id": req.params.id }, { "note": doc._id })
+      // Execute the above query
+      .exec(function(err, doc) {
+        // Log any errors
+        if (err) {
+          console.log(err);
+        }
+        else {
+          // Or send the document to the browser
+          res.send(doc);
+        }
+      });
     }
   });
 });
