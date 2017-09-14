@@ -14,7 +14,7 @@ var request = require("request");
 // Initialize Express
 var app = express();
 
-var PORT = 3000 || process.env.PORT;
+var PORT = process.env.PORT || 3000;
 
 // Listen on port 3000
 app.listen(PORT,  function() {
